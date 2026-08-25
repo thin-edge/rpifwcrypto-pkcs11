@@ -9,9 +9,11 @@ name: release
 #       -> same packages are built and uploaded to the run as artifacts,
 #          nothing is published
 #
-# The module and the bundled rpi-fw-crypto CLI link against the system libc,
-# so each package is built natively inside a container matching the target
-# distribution family (glibc for deb/rpm, musl for apk) on an arm64 runner.
+# Everything runs in a single job on an arm64 runner: the module and the
+# rpi-fw-crypto CLI are compiled once against glibc (in a Debian container, for
+# the deb and rpm packages) and once against musl (in an Alpine container, for
+# the apk package), because a glibc shared object cannot be loaded by musl.
+# Both builds package with nfpm into the same ./dist directory.
 
 permissions:
   contents: write
@@ -22,28 +24,19 @@ on:
       - "*"
   workflow_dispatch:
 
+env:
+  ARCH: arm64
+  GLIBC_IMAGE: debian:bookworm
+  MUSL_IMAGE: alpine:3.20
+
 jobs:
-  build:
-    name: Package (${{ matrix.packager }})
+  release:
+    name: Package and release
     runs-on: ubuntu-24.04-arm
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Debian 12 (bookworm) is the Raspberry Pi OS base: building against
-          # its glibc keeps the packages installable on older releases too.
-          - packager: deb
-            image: debian:bookworm
-            setup: apt-get update && apt-get install -y --no-install-recommends build-essential cmake libgnutls28-dev
-            verify: apt-get update && apt-get install -y ./dist/*.deb
-          - packager: rpm
-            image: almalinux:9
-            setup: dnf -y install gcc gcc-c++ make cmake gnutls-devel binutils
-            verify: dnf -y install ./dist/*.rpm
-          - packager: apk
-            image: alpine:3.20
-            setup: apk add --no-cache build-base cmake gnutls-dev
-            verify: apk add --allow-untrusted dist/*.apk
+    env:
+      PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+      PUBLISH_OWNER: ${{ secrets.PUBLISH_OWNER }}
+      PUBLISH_REPO: ${{ secrets.PUBLISH_REPO }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -72,56 +65,49 @@ jobs:
           echo "Building version $version"
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
 
-      - name: Build and package
+      # Debian 12 (bookworm) is the Raspberry Pi OS base: building against its
+      # glibc keeps the packages installable on older releases too.
+      - name: Build and package (glibc - deb, rpm)
         run: |
-          docker run --rm \
-            -v "$PWD:/src" -w /src \
-            -v "$(command -v nfpm):/usr/local/bin/nfpm:ro" \
-            -e SEMVER -e ARCH -e PACKAGERS \
-            "${{ matrix.image }}" \
-            sh -c '${{ matrix.setup }} && ci/build.sh'
+          ci/run-in-container.sh "$GLIBC_IMAGE" \
+            'apt-get update && apt-get install -y --no-install-recommends build-essential cmake libgnutls28-dev'
         env:
           SEMVER: ${{ env.RELEASE_VERSION }}
-          ARCH: arm64
-          PACKAGERS: ${{ matrix.packager }}
+          PACKAGERS: deb rpm
 
-      - name: Verify the package installs
+      - name: Build and package (musl - apk)
         run: |
-          docker run --rm -v "$PWD:/src" -w /src "${{ matrix.image }}" sh -c '
-            set -eux
-            ${{ matrix.verify }}
+          ci/run-in-container.sh "$MUSL_IMAGE" \
+            'apk add --no-cache build-base cmake gnutls-dev'
+        env:
+          SEMVER: ${{ env.RELEASE_VERSION }}
+          PACKAGERS: apk
+
+      - name: Verify the packages install
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$GLIBC_IMAGE" sh -eux -c '
+            apt-get update && apt-get install -y ./dist/*.deb
             test -f /usr/lib/pkcs11/rpifwcrypto-pkcs11.so
             test -f /usr/share/p11-kit/modules/rpifwcrypto.module
-            rpi-fw-crypto 2>&1 | head -n 3 || true
-          '
+            rpi-fw-crypto 2>&1 | head -n 3 || true'
+          docker run --rm -v "$PWD:/src" -w /src almalinux:9 sh -eux -c '
+            dnf -y install ./dist/*.rpm
+            test -f /usr/lib/pkcs11/rpifwcrypto-pkcs11.so
+            rpi-fw-crypto 2>&1 | head -n 3 || true'
+          docker run --rm -v "$PWD:/src" -w /src "$MUSL_IMAGE" sh -eux -c '
+            apk add --allow-untrusted dist/*.apk
+            test -f /usr/lib/pkcs11/rpifwcrypto-pkcs11.so
+            rpi-fw-crypto 2>&1 | head -n 3 || true'
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: packages-${{ matrix.packager }}
-          path: dist/*.${{ matrix.packager }}
+          name: packages
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.apk
           if-no-files-found: error
-
-  release:
-    name: Release
-    needs: build
-    runs-on: ubuntu-latest
-    env:
-      PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
-      PUBLISH_OWNER: ${{ secrets.PUBLISH_OWNER }}
-      PUBLISH_REPO: ${{ secrets.PUBLISH_REPO }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Download packages
-        uses: actions/download-artifact@v5
-        with:
-          pattern: packages-*
-          merge-multiple: true
-          path: dist
-
-      - run: ls -l dist
 
       - name: Release
         uses: softprops/action-gh-release@v3
@@ -132,7 +118,9 @@ jobs:
           generate_release_notes: true
           draft: true
           files: |
-            ./dist/*
+            ./dist/*.deb
+            ./dist/*.rpm
+            ./dist/*.apk
 
       # Skipped (without failing) when the Cloudsmith secrets are not set
       - name: Publish

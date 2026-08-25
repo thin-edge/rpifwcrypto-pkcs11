@@ -124,13 +124,22 @@ make install
 
 ### Building the packages locally
 
-The packages are built with [nfpm](https://nfpm.goreleaser.com). Run the following **on an arm64 device or container matching the target** (the module and CLI link against the system libc, so glibc packages must be built on a glibc system and the apk package on Alpine):
+The packages are built with [nfpm](https://nfpm.goreleaser.com). On an arm64 machine with nfpm and docker installed:
+
+```sh
+SEMVER=1.0.0 PACKAGERS="deb rpm" ci/run-in-container.sh debian:bookworm \
+  'apt-get update && apt-get install -y --no-install-recommends build-essential cmake libgnutls28-dev'
+SEMVER=1.0.0 PACKAGERS=apk ci/run-in-container.sh alpine:3.20 \
+  'apk add --no-cache build-base cmake gnutls-dev'
+```
+
+The packages are written to `./dist`, which is exactly what the [release workflow](.github/workflows/release.yaml) does. Two builds are needed because the module and the CLI link against the system libc: the glibc build (on Debian 12, the Raspberry Pi OS base, so the binaries also run on newer glibc releases) covers the deb and rpm packages, while the apk package needs a musl build, since a glibc shared object cannot be loaded by musl's dynamic linker.
+
+To build and package directly on the target device (no containers), run `ci/build.sh` on it instead:
 
 ```sh
 ci/build.sh 1.0.0
 ```
-
-The packages are written to `./dist`. The [release workflow](.github/workflows/release.yaml) does the same inside `debian:bookworm`, `almalinux:9` and `alpine:3.20` containers on an arm64 runner.
 
 ## Key provisioning
 

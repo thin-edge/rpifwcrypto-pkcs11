@@ -3,10 +3,13 @@
 # Build the module and the linux packages
 # -------------------------------------------
 # Compiles rpifwcrypto-pkcs11 for the machine it runs on and packages it with
-# nfpm. The module links against the system libc, so it must be built on (or
-# in a container matching) the target: glibc for the deb/rpm packages, musl
-# for the apk package. The release workflow does exactly that, running this
-# script once per packager inside a matching arm64 container.
+# nfpm. The module and the rpi-fw-crypto CLI link against the system libc, so
+# they have to be built against the libc they will run on: one glibc build
+# covers the deb and rpm packages, and a second musl build is needed for the
+# apk package (a glibc shared object cannot be dlopen()ed by musl's loader).
+# The release workflow therefore calls this script twice, once in a Debian
+# container with PACKAGERS="deb rpm" and once in an Alpine container with
+# PACKAGERS=apk, both writing into the same ./dist directory.
 #
 # Usage:
 #     ci/build.sh [<semver>]
@@ -39,7 +42,9 @@ if ! command -v nfpm >/dev/null 2>&1; then
     exit 2
 fi
 
-rm -rf build dist
+# Only the build tree and the staged payload are cleaned: packages built by a
+# previous invocation (for a different libc) are kept.
+rm -rf build dist/pkgroot
 mkdir -p dist/pkgroot/usr/lib/pkcs11 dist/pkgroot/usr/bin
 
 cmake -B build -S . \
