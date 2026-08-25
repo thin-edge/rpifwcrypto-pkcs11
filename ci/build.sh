@@ -18,6 +18,7 @@
 #     SEMVER      Package version, e.g. 1.0.0 (default: derived from git)
 #     ARCH        Package architecture (default: arm64)
 #     PACKAGERS   Space separated nfpm packagers (default: "deb rpm apk")
+#     MAX_GLIBC   Oldest glibc the packages must work on (see ci/check-glibc.sh)
 set -eu
 
 if [ $# -gt 0 ]; then
@@ -68,6 +69,13 @@ if [ -z "$RPI_FW_CRYPTO" ]; then
 fi
 cp "$RPI_FW_CRYPTO" dist/pkgroot/usr/bin/rpi-fw-crypto
 strip --strip-unneeded dist/pkgroot/usr/bin/rpi-fw-crypto 2>/dev/null || true
+
+# Guard against building in an image whose glibc is newer than the oldest
+# distribution release the packages are meant to support.
+echo ""
+ci/check-glibc.sh \
+    dist/pkgroot/usr/lib/pkcs11/rpifwcrypto-pkcs11.so \
+    dist/pkgroot/usr/bin/rpi-fw-crypto
 
 for package_type in $PACKAGERS; do
     echo ""

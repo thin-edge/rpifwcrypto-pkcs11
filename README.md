@@ -127,13 +127,32 @@ make install
 The packages are built with [nfpm](https://nfpm.goreleaser.com). On an arm64 machine with nfpm and docker installed:
 
 ```sh
-SEMVER=1.0.0 PACKAGERS="deb rpm" ci/run-in-container.sh debian:bookworm \
+SEMVER=1.0.0 PACKAGERS="deb rpm" ci/run-in-container.sh debian:bullseye \
   'apt-get update && apt-get install -y --no-install-recommends build-essential cmake libgnutls28-dev'
 SEMVER=1.0.0 PACKAGERS=apk ci/run-in-container.sh alpine:3.20 \
   'apk add --no-cache build-base cmake gnutls-dev'
 ```
 
-The packages are written to `./dist`, which is exactly what the [release workflow](.github/workflows/release.yaml) does. Two builds are needed because the module and the CLI link against the system libc: the glibc build (on Debian 12, the Raspberry Pi OS base, so the binaries also run on newer glibc releases) covers the deb and rpm packages, while the apk package needs a musl build, since a glibc shared object cannot be loaded by musl's dynamic linker.
+The packages are written to `./dist`, which is exactly what the [release workflow](.github/workflows/release.yaml) does. Two builds are needed because the module and the CLI link against the system libc: one glibc build covers the deb and rpm packages, while the apk package needs a musl build, since a glibc shared object cannot be loaded by musl's dynamic linker.
+
+#### libc compatibility
+
+glibc is backwards but not forwards compatible: a binary runs on any glibc at least as new as the highest versioned symbol it references, so **the build image decides the oldest distribution the packages support**. Building on Debian 12 instead of Debian 11, for example, pulls in `__libc_start_main@GLIBC_2.34` and silently raises the requirement to glibc 2.34, which still installs on Raspberry Pi OS bullseye but fails at runtime with ``version `GLIBC_2.34' not found``.
+
+Two things keep that from happening by accident:
+
+- the glibc packages are built in `debian:bullseye`, the oldest supported release;
+- `ci/build.sh` runs [`ci/check-glibc.sh`](ci/check-glibc.sh) on the built binaries and fails the build if anything requires a glibc newer than `MAX_GLIBC` (2.28 by default), naming the symbols responsible.
+
+Raise `MAX_GLIBC` (and the build image) only when the oldest supported release genuinely moves:
+
+| Baseline | glibc |
+|----------|-------|
+| Debian 10 / Raspberry Pi OS buster | 2.28 |
+| Debian 11 / Raspberry Pi OS bullseye | 2.31 |
+| Debian 12 / Raspberry Pi OS bookworm | 2.36 |
+
+The apk package is unaffected: musl does not use symbol versioning.
 
 To build and package directly on the target device (no containers), run `ci/build.sh` on it instead:
 

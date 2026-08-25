@@ -15,7 +15,7 @@
 #     PACKAGERS="deb rpm" ci/run-in-container.sh debian:bookworm \
 #         'apt-get update && apt-get install -y build-essential cmake libgnutls28-dev'
 #
-# SEMVER, ARCH and PACKAGERS are passed through to ci/build.sh.
+# SEMVER, ARCH, PACKAGERS and MAX_GLIBC are passed through to ci/build.sh.
 set -eu
 
 if [ $# -lt 2 ]; then
@@ -38,6 +38,6 @@ docker run --rm \
     -v "$PWD:/src" \
     -v "$NFPM:/usr/local/bin/nfpm:ro" \
     -w /src \
-    -e SEMVER -e ARCH -e PACKAGERS \
+    -e SEMVER -e ARCH -e PACKAGERS -e MAX_GLIBC \
     "$IMAGE" \
     sh -c "$SETUP && ci/build.sh"
