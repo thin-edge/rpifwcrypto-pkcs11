@@ -24,10 +24,18 @@ homepage: https://github.com/thin-edge/rpifwcrypto-pkcs11
 license: GPL-3.0-or-later
 
 # The PKCS#11 module itself only links against libc (librpifwcrypto is linked
-# statically and talks to the firmware via /dev/vcio_crypto), but the bundled
-# rpi-fw-crypto CLI links against GnuTLS. p11-kit is only needed if the module
-# is to be discovered through the p11-kit module configuration rather than by
-# an explicit path.
+# statically and talks to the firmware via /dev/vcio_crypto); the GnuTLS
+# dependency comes solely from the bundled rpi-fw-crypto CLI, which uses it
+# for a single SHA-256 when signing.
+#
+# Linking that statically is not an option: Debian ships libgnutls.a but no
+# libp11-kit.a, and Alpine has no gnutls-static package, so it would mean
+# building GnuTLS and p11-kit from source for every target. The dependency is
+# free where it matters anyway - libgnutls30 is preinstalled on Raspberry Pi
+# OS bullseye and bookworm, where apt itself depends on it.
+#
+# p11-kit is only needed if the module is to be discovered through the p11-kit
+# module configuration rather than by an explicit path.
 overrides:
   deb:
     # libgnutls30t64 (trixie and later) provides libgnutls30
