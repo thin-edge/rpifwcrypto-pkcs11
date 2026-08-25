@@ -86,9 +86,51 @@ Where the toolchain file sets `CMAKE_C_COMPILER` to your cross-compiler (e.g. `a
 
 ## Install
 
+### From a package (Raspberry Pi 4/5, arm64)
+
+Prebuilt `deb`, `rpm` and `apk` packages are attached to each [release](https://github.com/thin-edge/rpifwcrypto-pkcs11/releases) and published to the [thin-edge community package repository](https://cloudsmith.io/~thinedge/repos/community/packages/):
+
+```sh
+# Debian/Ubuntu/Raspberry Pi OS
+curl -1sLf 'https://dl.cloudsmith.io/public/thinedge/community/setup.deb.sh' | sudo -E bash
+sudo apt-get install rpifwcrypto-pkcs11
+```
+
+```sh
+# RPM based
+curl -1sLf 'https://dl.cloudsmith.io/public/thinedge/community/setup.rpm.sh' | sudo -E bash
+sudo dnf install rpifwcrypto-pkcs11
+```
+
+```sh
+# Alpine Linux
+curl -1sLf 'https://dl.cloudsmith.io/public/thinedge/community/setup.alpine.sh' | sudo -E bash
+sudo apk add rpifwcrypto-pkcs11
+```
+
+The package installs:
+
+| Path | Description |
+|------|-------------|
+| `/usr/lib/pkcs11/rpifwcrypto-pkcs11.so` | The PKCS#11 module |
+| `/usr/share/p11-kit/modules/rpifwcrypto.module` | p11-kit module configuration (absolute module path) |
+| `/usr/bin/rpi-fw-crypto` | Raspberry Pi OTP key provisioning CLI (from [raspi-utils](https://github.com/raspberrypi/utils)) |
+
+### From source
+
 ```sh
 make install
 ```
+
+### Building the packages locally
+
+The packages are built with [nfpm](https://nfpm.goreleaser.com). Run the following **on an arm64 device or container matching the target** (the module and CLI link against the system libc, so glibc packages must be built on a glibc system and the apk package on Alpine):
+
+```sh
+ci/build.sh 1.0.0
+```
+
+The packages are written to `./dist`. The [release workflow](.github/workflows/release.yaml) does the same inside `debian:bookworm`, `almalinux:9` and `alpine:3.20` containers on an arm64 runner.
 
 ## Key provisioning
 

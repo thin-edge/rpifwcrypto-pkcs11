@@ -1,0 +1,7 @@
+# p11-kit module configuration for the rpifwcrypto PKCS#11 module.
+# Installed to /usr/share/p11-kit/modules/rpifwcrypto.module by the
+# deb/rpm/apk packages. An absolute path is used so that the module is found
+# regardless of the distribution's p11-kit module directory.
+
+module: /usr/lib/pkcs11/rpifwcrypto-pkcs11.so
+critical: no

@@ -1,0 +1,140 @@
+name: release
+
+# Build and publish the arm64 (Raspberry Pi 4/5) packages.
+#
+#   * push a tag, e.g. `git tag 1.0.0 && git push origin 1.0.0`
+#       -> deb/rpm/apk are built, attached to a draft GitHub release and
+#          published to Cloudsmith (when the publish secrets are configured)
+#   * run manually (workflow_dispatch)
+#       -> same packages are built and uploaded to the run as artifacts,
+#          nothing is published
+#
+# The module and the bundled rpi-fw-crypto CLI link against the system libc,
+# so each package is built natively inside a container matching the target
+# distribution family (glibc for deb/rpm, musl for apk) on an arm64 runner.
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Package (${{ matrix.packager }})
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Debian 12 (bookworm) is the Raspberry Pi OS base: building against
+          # its glibc keeps the packages installable on older releases too.
+          - packager: deb
+            image: debian:bookworm
+            setup: apt-get update && apt-get install -y --no-install-recommends build-essential cmake libgnutls28-dev
+            verify: apt-get update && apt-get install -y ./dist/*.deb
+          - packager: rpm
+            image: almalinux:9
+            setup: dnf -y install gcc gcc-c++ make cmake gnutls-devel binutils
+            verify: dnf -y install ./dist/*.rpm
+          - packager: apk
+            image: alpine:3.20
+            setup: apk add --no-cache build-base cmake gnutls-dev
+            verify: apk add --allow-untrusted dist/*.apk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ">=1.17.0"
+
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      # Tag pushes are released under the tag name (a leading "v" is stripped
+      # by ci/build.sh); manual runs produce a dev snapshot version.
+      - name: Set version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            version="${GITHUB_REF#refs/tags/}"
+          else
+            version="0.0.0-dev.$(git rev-parse --short HEAD)"
+          fi
+          echo "Building version $version"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+
+      # nfpm is a static Go binary, so the same one can be mounted into every
+      # container (including the musl based Alpine one).
+      - name: Build and package
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" -w /src \
+            -v "$(command -v nfpm):/usr/local/bin/nfpm:ro" \
+            -e SEMVER -e ARCH -e PACKAGERS \
+            "${{ matrix.image }}" \
+            sh -c '${{ matrix.setup }} && ci/build.sh'
+        env:
+          SEMVER: ${{ env.RELEASE_VERSION }}
+          ARCH: arm64
+          PACKAGERS: ${{ matrix.packager }}
+
+      - name: Verify the package installs
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "${{ matrix.image }}" sh -c '
+            set -eux
+            ${{ matrix.verify }}
+            test -f /usr/lib/pkcs11/rpifwcrypto-pkcs11.so
+            test -f /usr/share/p11-kit/modules/rpifwcrypto.module
+            rpi-fw-crypto 2>&1 | head -n 3 || true
+          '
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.packager }}
+          path: dist/*.${{ matrix.packager }}
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+      PUBLISH_OWNER: ${{ secrets.PUBLISH_OWNER }}
+      PUBLISH_REPO: ${{ secrets.PUBLISH_REPO }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist
+
+      - run: ls -l dist
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          generate_release_notes: true
+          draft: true
+          files: |
+            ./dist/*
+
+      # Skipped (without failing) when the Cloudsmith secrets are not set
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/') && env.PUBLISH_TOKEN
+        run: ./ci/publish.sh ./dist --repo "$PUBLISH_REPO" --owner "$PUBLISH_OWNER"

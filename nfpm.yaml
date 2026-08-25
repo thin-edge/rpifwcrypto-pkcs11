@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=https://nfpm.goreleaser.com/static/schema.json
+---
+# nfpm configuration used to build the deb/rpm/apk packages.
+#
+# The payload (dist/pkgroot) is produced by ci/build.sh, which compiles the
+# module natively for the target libc before running nfpm once per packager.
+# SEMVER and ARCH are exported by ci/build.sh.
+name: rpifwcrypto-pkcs11
+arch: ${ARCH}
+platform: linux
+version: ${SEMVER}
+release: "r1"
+section: misc
+priority: optional
+maintainer: Community <community@thin-edge.io>
+description: |
+  PKCS#11 module for the Raspberry Pi firmware (OTP) ECDSA key.
+  Exposes the hardware-backed ECDSA key stored in the Raspberry Pi 4/5 OTP
+  through the PKCS#11 interface, so that OpenSSL, p11-kit and other PKCS#11
+  consumers can sign with it without exporting private key material. Also
+  ships the rpi-fw-crypto command line tool used to provision the OTP key.
+vendor: thin-edge.io
+homepage: https://github.com/thin-edge/rpifwcrypto-pkcs11
+license: GPL-3.0-or-later
+
+# The PKCS#11 module itself only links against libc (librpifwcrypto is linked
+# statically and talks to the firmware via /dev/vcio_crypto), but the bundled
+# rpi-fw-crypto CLI links against GnuTLS. p11-kit is only needed if the module
+# is to be discovered through the p11-kit module configuration rather than by
+# an explicit path.
+overrides:
+  deb:
+    # libgnutls30t64 (trixie and later) provides libgnutls30
+    depends:
+      - libgnutls30
+    recommends:
+      - p11-kit-modules
+  rpm:
+    depends:
+      - gnutls
+    recommends:
+      - p11-kit
+  apk:
+    depends:
+      - gnutls
+    recommends:
+      - p11-kit
+
+contents:
+  - src: ./dist/pkgroot/usr/lib/pkcs11/rpifwcrypto-pkcs11.so
+    dst: /usr/lib/pkcs11/rpifwcrypto-pkcs11.so
+    file_info:
+      mode: 0644
+
+  # Raspberry Pi's own CLI (from the raspi-utils submodule), used to provision
+  # and inspect the OTP key, e.g. `rpi-fw-crypto genkey --key-id 1 --alg ec`
+  - src: ./dist/pkgroot/usr/bin/rpi-fw-crypto
+    dst: /usr/bin/rpi-fw-crypto
+    file_info:
+      mode: 0755
+
+  # p11-kit module configuration. Unlike src/rpifwcrypto.module (which relies
+  # on the module being in p11-kit's own module directory), the packaged copy
+  # uses an absolute path so that it resolves identically on Debian, RPM and
+  # Alpine based systems.
+  - src: ./packaging/rpifwcrypto.module
+    dst: /usr/share/p11-kit/modules/rpifwcrypto.module
+    type: config|noreplace
+    file_info:
+      mode: 0644
+
+  - src: ./LICENSE
+    dst: /usr/share/doc/rpifwcrypto-pkcs11/LICENSE
+  - src: ./THIRD-PARTY-NOTICES
+    dst: /usr/share/doc/rpifwcrypto-pkcs11/THIRD-PARTY-NOTICES
+  - src: ./README.md
+    dst: /usr/share/doc/rpifwcrypto-pkcs11/README.md
