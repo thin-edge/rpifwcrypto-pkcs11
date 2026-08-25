@@ -9,7 +9,7 @@ name: rpifwcrypto-pkcs11
 arch: ${ARCH}
 platform: linux
 version: ${SEMVER}
-release: "r1"
+release: "1"
 section: misc
 priority: optional
 maintainer: Community <community@thin-edge.io>
