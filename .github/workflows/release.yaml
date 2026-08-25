@@ -55,8 +55,10 @@ jobs:
         with:
           go-version: ">=1.17.0"
 
+      # CGO_ENABLED=0 keeps nfpm a static binary, so the same one can be
+      # mounted into every container, including the musl based Alpine one.
       - name: Install nfpm
-        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+        run: CGO_ENABLED=0 go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 
       # Tag pushes are released under the tag name (a leading "v" is stripped
       # by ci/build.sh); manual runs produce a dev snapshot version.
@@ -70,8 +72,6 @@ jobs:
           echo "Building version $version"
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
 
-      # nfpm is a static Go binary, so the same one can be mounted into every
-      # container (including the musl based Alpine one).
       - name: Build and package
         run: |
           docker run --rm \
